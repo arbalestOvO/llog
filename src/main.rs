@@ -117,6 +117,19 @@ fn process_dir(input_path: &PathBuf, all_lines: &mut Vec<String>, sender: egui_i
 }
 
 
+fn split_strings_by_newline(input_vec: Vec<String>) -> Vec<String> {
+    input_vec
+        .into_iter()
+        .flat_map(|s| {
+            s.lines()
+                .map(|line| line.to_string())
+                .collect::<Vec<String>>()
+        })
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+
 fn process_input_path(
     input_path: PathBuf,
     sender: egui_inbox::UiInboxSender<AnalysisUpdate>,
@@ -130,6 +143,7 @@ fn process_input_path(
         process_item(DataSource::Path(input_path.as_path()), &input_path.as_path().file_name().unwrap_or_default().to_string_lossy(), &mut all_lines, 0, sender).map_err(|e| AppError::OtherError(format!("{:?}", e)))?;
     }
     if sorted {
+        all_lines = split_strings_by_newline(all_lines);
         all_lines.par_sort_unstable();
     }
     // Save to log file
