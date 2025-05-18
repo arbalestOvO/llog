@@ -1,3 +1,5 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 mod file_handler;
 use eframe::{App, NativeOptions, egui};
 use egui_inbox::UiInbox;
