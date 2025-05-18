@@ -96,7 +96,7 @@ fn load_commands() -> Result<Vec<CommandConfig>> {
 enum AnalysisUpdate {
     FileProcessed(String), // Name of the file processed
     Error(String),
-    Completed(PathBuf), // Path to the generated log file
+    Completed(PathBuf, u128), // Path to the generated log file
 }
 
 fn process_dir(input_path: &PathBuf, all_lines: &mut Vec<String>, sender: egui_inbox::UiInboxSender<AnalysisUpdate>,) -> anyhow::Result<()> {
@@ -120,6 +120,7 @@ fn process_dir(input_path: &PathBuf, all_lines: &mut Vec<String>, sender: egui_i
 fn process_input_path(
     input_path: PathBuf,
     sender: egui_inbox::UiInboxSender<AnalysisUpdate>,
+    sorted: bool,
 ) -> Result<PathBuf> {
     let mut all_lines: Vec<String> = Vec::new();
 
@@ -128,9 +129,9 @@ fn process_input_path(
     } else {
         process_item(DataSource::Path(input_path.as_path()), &input_path.as_path().file_name().unwrap_or_default().to_string_lossy(), &mut all_lines, 0, sender).map_err(|e| AppError::OtherError(format!("{:?}", e)))?;
     }
-
-    all_lines.par_sort_unstable();
-
+    if sorted {
+        all_lines.par_sort_unstable();
+    }
     // Save to log file
     let temp_dir = std::env::temp_dir();
     let log_rt_dir = temp_dir.join("log_rt");
@@ -166,6 +167,7 @@ struct MyApp {
     log_output_dir: PathBuf,
     analysis_inbox: UiInbox<AnalysisUpdate>, // Using UiInbox
     analysis_thread_join_handle: Option<thread::JoinHandle<()>>,
+    sorted: bool,
 }
 
 impl Default for MyApp {
@@ -195,6 +197,7 @@ impl Default for MyApp {
             log_output_dir,
             analysis_inbox: UiInbox::new(),
             analysis_thread_join_handle: None,
+            sorted: true
         }
     }
 }
@@ -214,9 +217,9 @@ impl App for MyApp {
                         let _ = handle.join();
                     }
                 }
-                AnalysisUpdate::Completed(log_path) => {
+                AnalysisUpdate::Completed(log_path, use_time) => {
                     self.status_message =
-                        format!("Analysis complete! Log saved to: {}", log_path.display());
+                        format!("Analysis complete {} ms! Log saved to: {}", use_time, log_path.display());
                     self.analysis_in_progress = false;
                     if let Some(handle) = self.analysis_thread_join_handle.take() {
                         let _ = handle.join();
@@ -349,12 +352,14 @@ impl App for MyApp {
 
                             let analysis_path = path_to_use.clone();
                             let sender = self.analysis_inbox.sender();
-
+                            let sorted = self.sorted;
                             self.analysis_thread_join_handle = Some(thread::spawn(move || {
-                                match process_input_path(analysis_path, sender.clone()) {
+                                let begin_time = std::time::Instant::now();
+                                match process_input_path(analysis_path, sender.clone(), sorted) {
                                     Ok(log_file_path) => {
+                                        let end_time = std::time::Instant::now();
                                         let _ =
-                                            sender.send(AnalysisUpdate::Completed(log_file_path));
+                                            sender.send(AnalysisUpdate::Completed(log_file_path, (end_time - begin_time).as_millis()));
                                     }
                                     Err(e) => {
                                         let _ = sender.send(AnalysisUpdate::Error(format!(
@@ -394,6 +399,10 @@ impl App for MyApp {
                     } else {
                         self.status_message = "Log directory does not exist.".to_string();
                     }
+                }
+
+                if ui.radio(self.sorted, "sort").clicked() {
+                    self.sorted = !self.sorted;
                 }
             });
             ui.separator();
